@@ -6,8 +6,7 @@
 
 ### About
 
-Program to classificate flowers from 17 Category Flowers Dataset
-https://www.robots.ox.ac.uk/~vgg/data/flowers/17/
+Program to classificate flowers from [17 Category Flowers Dataset](https://www.robots.ox.ac.uk/~vgg/data/flowers/17/ "https://www.robots.ox.ac.uk/~vgg/data/flowers/17/")
 
 I really don't know how to achieve >95% accuracy/f1 on this dataset, because there are 3-5 classes that I hardly distinguish myself.
 

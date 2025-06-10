@@ -1,6 +1,6 @@
 # GoneCharAI
 
-## Classification lab work
+## Segmentation lab work
 
 ---
 

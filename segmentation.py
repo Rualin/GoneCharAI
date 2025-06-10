@@ -1,170 +1,104 @@
 import os
-from math import ceil
 
 import torch
 import torchvision
-import segmentation_models_pytorch as smp
 from torch.utils.data import DataLoader
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import numpy as np
 
 import data_preprocess as dp
+import useful_funcs as fuc
+import loops as ls
 
 
 PATH = os.path.join("saves", "save.pth")
-BS = 2
+BS = 16
 EPOCHES = 100
 LR = 1e-3
-LRS = [1e-2, 1e-2, 1e-3, 1e-3, 1e-4, 1e-4, 1e-5]
-ENCODER = "resnet34"
-ENCODER_WEIGHTS = "imagenet"
-ACTIVATION = "sigmoid"
+LRS = [1e-4, 1e-5, 1e-5, 1e-6]
+THRESHOLD = 0.5
 torch.set_default_device(dp.DEVICE)
-loss = torch.nn.BCELoss()
-METRICS = [
-    smp.metrics.iou_score,
-    smp.metrics.f1_score,
-    smp.metrics.accuracy,
-    smp.metrics.recall,
-    smp.metrics.precision,
-]
-METRICS_NAMES = ["IoU", "F1Score", "Accuracy", "Recall", "Precision"]
 
-def train_val_loop(model, criterion, optimizer, dl, is_val):
-    if is_val:
-        model.eval()
-    else:
-        model.train()
-    running_loss = 0.0
-    met_vals = torch.zeros(len(METRICS), dtype=torch.float32)
-    for data in tqdm(dl):
-        inputs = data[0].to(dp.DEVICE)
-        labels = data[1].to(dp.DEVICE)
-        if not(is_val):
-            optimizer.zero_grad()
-        outputs:torch.Tensor = model(inputs)
-        outputs = outputs.view_as(labels)
-        loss = criterion(outputs, labels)
-        if not(is_val):
-            loss.backward()
-            optimizer.step()
-        running_loss += loss.item()
-        preds = torch.threshold(outputs, 0.5, 0)
-        preds = preds.to(dtype=torch.bool)
-        labels = labels.to(dtype=torch.bool)
-        tp = (preds & labels).sum()
-        tn = (~preds & ~labels).sum()
-        fp = (preds & ~labels).sum()
-        fn = (~preds & labels).sum()
-        for i, metric in enumerate(METRICS):
-            met = metric(tp, fp, fn, tn)
-            # print(met.shape, met_vals.shape)
-            # print(met.sum(dim=0))
-            # print(met)
-            met_vals[i] += met
-    met_vals /= len(dl)
-    if is_val:
-        print("\tValid:")
-    else:
-        print("\tTrain:")
-    print(f'\t\tLoss: {(running_loss / len(dl)):.3f}', end = "")
-    for i in range(len(METRICS)):
-        print(f", {METRICS_NAMES[i]}: {met_vals[i]}", end="")
-    print()
-    return running_loss / len(dl), met_vals
+CRITER = fuc.BCEDICELoss()
 
 
-def metrics_plot(**metrics):
-    length = len(metrics)
-    ncols = 2
-    nrows = ceil(length / 2)
-    fig, ax = plt.subplots(nrows=nrows, ncols=ncols)
-    for i, (name, val) in enumerate(metrics.items()):
-        ax[i // ncols, i % ncols].plot(val)
-        ax[i // ncols, i % ncols].set_title(name)
-    fig.suptitle("Metrics")
-    return fig
-
-
-def training(model, train_dl, val_dl, criterion, lrs, epoches=10):
-    train_losses = []
-    val_losses = []
-    val_metrics = []
+def training(model, train_dl, val_dl, criterion, start_lr, epoches=10):
+    result = {"Train loss": [], "Val loss": [], "Rec": [], "Prec": [], "F1": [], "IoU": []}
     maxiou = 0
-    lr_id = 0
+    curr_lr = start_lr
     for epoch in range(epoches):
-        if (epoch % 10 == 0):
-            optimizer = torch.optim.Adam(model.parameters(), lr=lrs[lr_id])
-            lr_id = min(len(lrs) - 1, lr_id + 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=curr_lr)
+
         print("Epoch:", epoch)
-        print("LR:", lrs[lr_id])
-        tr_loss, train_mets = train_val_loop(model, criterion, optimizer, train_dl, False)
-        train_losses.append(tr_loss)
-        val_loss, val_mets = train_val_loop(model, criterion, optimizer, val_dl, True)
-        val_losses.append(val_loss)
-        val_metrics.append(val_mets)
-        if val_mets[0] > maxiou:
+        print("LR:", curr_lr)
+        if curr_lr > 5e-9:
+            curr_lr *= 0.8
+
+        tr_loss, train_confs = ls.train_loop(model, criterion, optimizer, train_dl)
+        result["Train loss"].append(tr_loss)
+        print(f"\tTrain loss: {tr_loss:.4f}")
+
+        val_loss, val_confs = ls.val_loop(model, criterion, val_dl)
+        result["Val loss"].append(val_loss)
+        print(f"Val loss: {val_loss:.4f}", end="")
+        
+        val_mets = fuc.calculate_metrics(val_confs)
+        for key in val_mets:
+            result[key].append(val_mets[key])
+            print(f", {key}: {val_mets[key]:.4f}", end="")
+        print()
+
+        if val_mets["IoU"] > maxiou:
             if maxiou != 0:
                 os.system("rm -f " + os.path.join("saves", f"maxIoU_{(maxiou * 100):.0f}.pth"))
-            maxiou = val_mets[0]
-            torch.save(model.state_dict(), os.path.join("saves", f"maxIoU_{(val_mets[0] * 100):.0f}.pth"))
+            maxiou = val_mets["IoU"]
+            torch.save(model.state_dict(), os.path.join("saves", f"maxIoU_{(maxiou * 100):.0f}.pth"))
+
         if epoch % 10 == 0 and epoch != 0:
             torch.save(model.state_dict(), os.path.join("saves", f"epoch_{epoch}.pth"))
-            metrics = dict(zip(METRICS_NAMES + ["Train_loss", "Val_loss"], val_mets.tolist() + [train_losses, val_losses]))
-            plot = metrics_plot(**metrics)
+            plot = fuc.metrics_plot(result)
             if not(os.path.exists("plots")):
                 os.mkdir("plots")
-            plot.savefig(os.path.join("plots", f"MetricsDeepLabv3_{epoch}Epoches.png"))
-        if tr_loss < 0.005:
-            cnt_small += 1
-        else:
-            cnt_small = 0
-        if cnt_small == 3:
-            # torch.save(model.state_dict(), os.path.join("saves", f"epoch_{epoch}_small.pth"))
-            # plot = metrics_plot(train_losses, val_losses, train_f1s, val_f1s, train_accs, val_accs)
-            metrics = dict(zip(METRICS_NAMES + ["Train_loss", "Val_loss"], val_mets.tolist() + [train_losses, val_losses]))
-            plot = metrics_plot(**metrics)
-            if not(os.path.exists("plots")):
-                os.mkdir("plots")
-            plot.savefig(os.path.join("plots", f"MetricsDeepLabv3_{epoch}Epoches_small.png"))
-            break
-    return train_losses, val_losses, train_mets, val_mets
+            plot.savefig(os.path.join("plots", f"MetricsDeepLabv3_{epoch}Epoche.png"))
+
+    return result
 
 if __name__ == "__main__":
-    train_ds = dp.RoadDataset(dp.x_train_dir, dp.y_train_dir, preprocessing=torchvision.transforms.Resize((1504, 1504)))
-    val_ds = dp.RoadDataset(dp.x_valid_dir, dp.y_valid_dir, preprocessing=torchvision.transforms.Resize((1504, 1504)))
-    test_ds = dp.RoadDataset(dp.x_test_dir, dp.y_test_dir, preprocessing=torchvision.transforms.Resize((1504, 1504)))
-    train_dl = DataLoader(train_ds, BS, shuffle=True, generator=torch.Generator(device=dp.DEVICE))
-    val_dl = DataLoader(val_ds, BS, generator=torch.Generator(device=dp.DEVICE))
-    test_dl = DataLoader(test_ds, 1, generator=torch.Generator(device=dp.DEVICE))
-
-    if dp.DEVICE == torch.device("cuda:1"):
+    if dp.DEVICE != torch.device("cpu"):
         torch.cuda.empty_cache()
 
-    model = smp.DeepLabV3(encoder_name=ENCODER,
-                          encoder_weights=ENCODER_WEIGHTS,
-                          encoder_output_stride=8,
-                          classes=1,
-                          activation=ACTIVATION)
-    model.to(dp.DEVICE)
+    train_ds = dp.RoadDataset(dp.x_train_dir, dp.y_train_dir,
+                              transform=dp.TRAIN_TRANSFORM, bs=BS)
+    val_ds = dp.RoadDataset(dp.x_valid_dir, dp.y_valid_dir,
+                            transform=dp.VALID_TRANSFORM, bs=1)
+    test_ds = dp.RoadDataset(dp.x_test_dir, dp.y_test_dir,
+                             transform=dp.VALID_TRANSFORM, bs=1)
+    train_dl = DataLoader(train_ds, BS, shuffle=True, generator=torch.Generator(device=dp.DEVICE))
+    val_dl = DataLoader(val_ds, 1, generator=torch.Generator(device=dp.DEVICE))
+    test_dl = DataLoader(test_ds, 1, generator=torch.Generator(device=dp.DEVICE))
 
-    batch = next(iter(train_dl))
-    # print(type(batch))
-    # print(len(batch))
-    # print(batch[0].shape, batch[1].shape)
-    res = model(batch[0])
-    # print(res.shape)
-    # print(batch.shape)
+    model = torchvision.models.segmentation.deeplabv3_resnet50(
+        weights=torchvision.models.segmentation.DeepLabV3_ResNet50_Weights.DEFAULT,
+        weights_backbone=torchvision.models.ResNet50_Weights.DEFAULT
+    )
+    model.aux_classifier[4] = torch.nn.Conv2d(256, 1, kernel_size=1)
+    model.classifier[4] = torch.nn.Conv2d(256, 1, kernel_size=1)
+    # model = torch.nn.DataParallel(model)
+    model.to(dp.DEVICE)
 
     # is_load = int(input("Load model? (0/1) "))
     is_load = 0
     if is_load:
-        model.load_state_dict(torch.load(PATH))
+        model.load_state_dict(torch.load(os.path.join("saves", "maxIoU_59.pth")))
+        test_loss, test_conf = ls.val_loop(model, CRITER, test_dl)
+        test_metrics = fuc.calculate_metrics(test_conf)
+        print("Test loss:", test_loss)
+        for key in test_metrics:
+            print(f"{key}: {test_metrics[key]}")    
     else:
-        train_losses, val_losses, train_mets, val_mets = training(model, train_dl, val_dl, criterion=loss, lrs=LRS, epoches=EPOCHES)
+        train_res = training(model, train_dl, val_dl, criterion=CRITER, start_lr=LR, epoches=EPOCHES)
         torch.save(model.state_dict(), PATH)
-        metrics = dict(zip(METRICS_NAMES + ["Train_loss", "Val_loss"], val_mets.tolist() + [train_losses, val_losses]))
-        plot = metrics_plot(**metrics)
-        plot.savefig(os.path.join("plots", f"MetricsDeepLabv3_{EPOCHES}Epoches.png"))
+        plot = fuc.metrics_plot(train_res)
+        plot.savefig(os.path.join("plots", f"MetricsDeepLabv3_{EPOCHES}Epoche.png"))
         plot.show()
+
+
+    torch.cuda.empty_cache()

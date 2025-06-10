@@ -4,15 +4,16 @@ import random
 import cv2
 import numpy as np
 import pandas as pd
-from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 import torch
 import torchvision
+import albumentations as album
 
 
-DEVICE = torch.device("cuda:1") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
 torch.set_default_device(DEVICE)
-DATA_DIR = "tiff"
+DATA_DIR = "croped2"
+TEST = True
 
 x_train_dir = os.path.join(DATA_DIR, 'train')
 y_train_dir = os.path.join(DATA_DIR, 'train_labels')
@@ -51,83 +52,106 @@ def visualize(**images):
         plt.imshow(image)
     plt.show()
 
+TRAIN_CROP_SIZE = 256
 
-class RoadDataset(Dataset):
-
-    """Massachusetts Road Dataset. Read images, apply augmentation and preprocessing transformations.
-    
-    Args:
-        images_dir (str): path to images folder
-        masks_dir (str): path to segmentation masks folder
-        class_rgb_values (list): RGB values of select classes to extract from segmentation mask
-        augmentation (albumentations.Compose): data transfromation pipeline 
-            (e.g. flip, scale, etc.)
-        preprocessing (albumentations.Compose): data preprocessing 
-            (e.g. noralization, shape manipulation, etc.)
-    
-    """
-    
-    def __init__(
-            self, 
-            images_dir, 
-            masks_dir, 
-            class_rgb_values=class_rgb_values, 
-            augmentation=None, 
-            preprocessing=None,
-        ):
+TRAIN_TRANSFORM = album.Compose([
+        # Базовые аугментации
+        album.RandomCrop(height=TRAIN_CROP_SIZE, width=TRAIN_CROP_SIZE, p = 1),
         
+        # Цветовые аугментации
+        album.OneOf([
+            album.RandomGamma(gamma_limit=(80, 120), p=0.5),
+            album.RandomBrightnessContrast(
+                brightness_limit=0.2, 
+                contrast_limit=0.2, 
+                brightness_by_max=True,
+                p=0.5
+            ),
+            album.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), p=0.5),
+            album.HueSaturationValue(
+                hue_shift_limit=10,
+                sat_shift_limit=20,
+                val_shift_limit=10,
+                p=0.5
+            )
+        ], p=0.75),
+        
+        # Геометрические аугментации
+        album.OneOf([
+            album.HorizontalFlip(p=0.5),
+            album.VerticalFlip(p=0.5),
+            album.ShiftScaleRotate(
+                shift_limit=0.1,
+                scale_limit=0.1,
+                rotate_limit=15,
+                border_mode=cv2.BORDER_CONSTANT,
+                p=0.5
+            )
+        ], p=0.75),
+        
+        # Размытия и шумы
+        album.OneOf([
+            album.GaussianBlur(blur_limit=(3, 5), p=0.5),
+            album.GaussNoise(p=0.5),
+            album.ISONoise(
+                color_shift=(0.01, 0.05),
+                intensity=(0.1, 0.5),
+                p=0.5
+            )
+        ], p=0.5),
+        album.ToTensorV2()
+    ]
+)
+VALID_TRANSFORM = album.Compose([
+    album.PadIfNeeded(min_height=1536, min_width=1536, border_mode=cv2.BORDER_CONSTANT),
+    album.ToTensorV2()
+])
+
+class RoadDataset(torch.utils.data.Dataset):
+    def __init__(
+            self,
+            images_dir,
+            masks_dir,
+            transform=None,
+            bs=8
+    ):
         self.image_paths = [os.path.join(images_dir, image_id) for image_id in sorted(os.listdir(images_dir))]
         self.mask_paths = [os.path.join(masks_dir, image_id) for image_id in sorted(os.listdir(masks_dir))]
-        if len(self.image_paths) != len(self.mask_paths):
-            raise ValueError("Lengths of image list and mask list are unequal")
+        length = len(self.image_paths)
+        if length % bs != 0:
+            length = (length // bs) * bs
+        self.image_paths = self.image_paths[:length]
+        self.mask_paths = self.mask_paths[:length]
 
-        self.class_rgb_values = class_rgb_values
-        self.augmentation = augmentation
-        self.preprocessing = preprocessing
-    
+        if TEST and bs != 1:
+            length = int((length / bs) * 0.2) * bs
+            self.image_paths = self.image_paths[:length]
+            self.mask_paths = self.mask_paths[:length]
+
+        self.transform = transform
+
     def __getitem__(self, i):
-        
-        # read images and masks
         image = cv2.cvtColor(cv2.imread(self.image_paths[i]), cv2.COLOR_BGR2RGB)
-        mask = cv2.cvtColor(cv2.imread(self.mask_paths[i]), cv2.COLOR_BGR2GRAY)
-        image = cv2.resize(image, (512, 512))
-        mask = cv2.resize(mask, (512, 512))
-        image = torchvision.transforms.ToTensor()(image)
-        image = image.to(dtype=torch.float32)
-        # one-hot-encode the mask
-        # mask = one_hot_encode(mask, self.class_rgb_values).astype('float')
-        # print(mask.max(), mask.min())
-        mask = mask / 255
-        mask = torch.tensor(mask, dtype=torch.float32)
-        # print(mask.shape)
-        # print(mask.max(), mask.min())
-
-        # # apply augmentations
-        # if self.augmentation:
-        #     sample = self.augmentation(image=image, mask=mask)
-        #     image, mask = sample['image'], sample['mask']
-        
-        # # apply preprocessing
-        # if self.preprocessing:
-        #     # sample = self.preprocessing(image=image, mask=mask)
-        #     # image, mask = sample['image'], sample['mask']
-        #     image = self.preprocessing(image)
-        #     mask = self.preprocessing(image)
-        image = image.to(device=DEVICE)
-        mask = mask.to(device=DEVICE)
+        mask = cv2.imread(self.mask_paths[i], cv2.IMREAD_GRAYSCALE).astype('float32') / 255.0
         # print(image.shape, mask.shape)
-        return image, mask
-        
+        # print("Image before:", image.mean(), image.std())
+        # print("Mask before:", mask.mean(), mask.std())
+        if self.transform is not None:
+            augmented = self.transform(image=image, mask=mask)
+
+        image = augmented['image'].float()
+        mask = augmented['mask'].float()
+        # print("Image after:", image.mean(), image.std())
+        # print("Mask after:", mask.mean(), mask.std())
+        # print(image.shape, mask.shape)
+        return image, mask.unsqueeze(0) 
+
     def __len__(self):
-        # return length of 
         return len(self.image_paths)
-    
-# torchvision.transforms.Compose([
-#     torchvision.transforms.
-# ])
+
 
 if __name__ == "__main__":
-    dataset = RoadDataset(x_train_dir, y_train_dir, class_rgb_values=class_rgb_values)
+    dataset = RoadDataset(x_train_dir, y_train_dir)
     random_idx = random.randint(0, len(dataset) - 1)
     image, mask = dataset[random_idx]
     print(image.shape, mask.shape)

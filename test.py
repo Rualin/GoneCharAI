@@ -15,7 +15,7 @@ THRESHIOU = [(0.02, 0.5415724262628692), (0.05, 0.5752392123103611),
              (0.95, 0.5350216822773398), (0.98, 0.440629390463493), 
              (0.99, 0.36189994837784356)]
 THRESHOLDS = [t[0] for t in THRESHIOU]
-IOUS = np.array([t[1] for t in THRESHIOU]) * 65 / 60
+IOUS = np.array([t[1] for t in THRESHIOU])
 
 
 plt.plot(THRESHOLDS, IOUS)

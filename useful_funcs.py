@@ -14,6 +14,7 @@ def compute_confusion(logits: torch.Tensor, targets: torch.Tensor, threshold: fl
     """
     Вычисляет TP, FP, TN, FN для бинарной маски
     """
+    logits = torch.nn.functional.sigmoid(logits)
     logits = (logits > threshold).float()
     targets = targets.float()
 
@@ -40,15 +41,13 @@ class BCEDICELoss(torch.nn.Module):
     '''
     My DICE-BCE loss
     '''
-    def __init__(self, threshold=0.5):
+    def __init__(self):
         super(BCEDICELoss, self).__init__()
         self.bce = torch.nn.BCEWithLogitsLoss()
-        self.threshold = threshold
     
     def forward(self, logits, target):
         bce_res = self.bce(logits, target)
         preds = torch.nn.functional.sigmoid(logits)
-        # preds = (preds > self.threshold).float()
         numen = (preds * target).sum()
         denom = preds.sum() + target.sum()
         dice_res = 2 * numen / (denom + 1e-7)
@@ -61,7 +60,7 @@ def metrics_plot(metrics: Dict):
     nrows = ceil(length / 2)
     fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(16, 16), constrained_layout=True)
     for i, (name, val) in enumerate(metrics.items()):
-        ax[i // ncols, i % ncols].plot(val)
+        ax[i // ncols, i % ncols].plot(val, cmap='hot')
         ax[i // ncols, i % ncols].set_title(name)
     fig.suptitle("Metrics")
     return fig

@@ -3,6 +3,7 @@ import shutil
 
 import numpy as np
 import cv2
+from tqdm import tqdm
 
 
 DATA_DIR = "tiff"
@@ -12,7 +13,7 @@ x_valid_dir = os.path.join(DATA_DIR, 'val')
 y_valid_dir = os.path.join(DATA_DIR, 'val_labels')
 x_test_dir = os.path.join(DATA_DIR, 'test')
 y_test_dir = os.path.join(DATA_DIR, 'test_labels')
-RES_DIR = "croped2"
+RES_DIR = "croped"
 
 def copy_crop(x_dir, y_dir, cnt=3):
     x_ims = os.listdir(os.path.join(DATA_DIR, x_dir))
@@ -29,10 +30,9 @@ def copy_crop(x_dir, y_dir, cnt=3):
 
     step = 1500 // cnt
     bound = step * (cnt - 1) + 1
-    for i in range(len(x_ims)):
+    for i in tqdm(range(len(x_ims))):
         x_img = cv2.imread(os.path.join(DATA_DIR, x_dir, x_ims[i]))
         y_img = cv2.imread(os.path.join(DATA_DIR, y_dir, y_ims[i]))
-        ind = 0
 
         for x in range(0, bound, step):
             for y in range(0, bound, step):
@@ -41,7 +41,7 @@ def copy_crop(x_dir, y_dir, cnt=3):
 
                 white_pixels = np.all(x_crop == [255, 255, 255], axis=-1)
                 white_ratio = np.sum(white_pixels) / white_pixels.size
-                if white_ratio > 0.7:
+                if white_ratio > 0.3:
                     continue
 
                 # end counting white pixels
@@ -51,15 +51,14 @@ def copy_crop(x_dir, y_dir, cnt=3):
 
                 x_path = os.path.join(RES_DIR, x_dir, x_ims[i][:(-5)])
                 y_path = os.path.join(RES_DIR, y_dir, y_ims[i][:(-4)])
-                cv2.imwrite(f"{x_path}_{ind}.tiff", x_crop)
-                cv2.imwrite(f"{y_path}_{ind}.tif", y_crop)
-                ind += 1
+                cv2.imwrite(f"{x_path}_{x // step}_{y // step}.png", x_crop)
+                cv2.imwrite(f"{y_path}_{x // step}_{y // step}.png", y_crop)
 
-        
+
 if __name__ == "__main__":
     if (os.path.exists(RES_DIR)):
         shutil.rmtree(RES_DIR)
-        os.mkdir(RES_DIR)
+    os.mkdir(RES_DIR)
 
     copy_crop("train", "train_labels")
     # copy_crop("val", "val_labels")

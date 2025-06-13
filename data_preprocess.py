@@ -10,10 +10,10 @@ import torchvision
 import albumentations as album
 
 
-DEVICE = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 torch.set_default_device(DEVICE)
-DATA_DIR = "croped2"
-TEST = True
+DATA_DIR = "croped"
+TEST = False
 
 x_train_dir = os.path.join(DATA_DIR, 'train')
 y_train_dir = os.path.join(DATA_DIR, 'train_labels')
@@ -57,6 +57,7 @@ TRAIN_CROP_SIZE = 256
 TRAIN_TRANSFORM = album.Compose([
         # Базовые аугментации
         album.RandomCrop(height=TRAIN_CROP_SIZE, width=TRAIN_CROP_SIZE, p = 1),
+        # album.PadIfNeeded(min_height=TRAIN_CROP_SIZE, min_width=TRAIN_CROP_SIZE, border_mode=cv2.BORDER_CONSTANT),
         
         # Цветовые аугментации
         album.OneOf([
@@ -124,13 +125,17 @@ class RoadDataset(torch.utils.data.Dataset):
         self.mask_paths = self.mask_paths[:length]
 
         if TEST and bs != 1:
-            length = int((length / bs) * 0.2) * bs
+            length = int((length / bs) * 0.05) * bs
             self.image_paths = self.image_paths[:length]
             self.mask_paths = self.mask_paths[:length]
 
         self.transform = transform
+        # print(self.image_paths[0])
+        # print(self.mask_paths[0])
 
     def __getitem__(self, i):
+        # print(self.image_paths[i])
+        # print(self.mask_paths[i])
         image = cv2.cvtColor(cv2.imread(self.image_paths[i]), cv2.COLOR_BGR2RGB)
         mask = cv2.imread(self.mask_paths[i], cv2.IMREAD_GRAYSCALE).astype('float32') / 255.0
         # print(image.shape, mask.shape)

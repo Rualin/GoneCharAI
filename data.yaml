@@ -1,0 +1,12 @@
+train: train
+val: val
+
+nc: 1
+names: ['human']
+
+roboflow:
+  workspace: new-workspace-qsuag
+  project: heridal-t428z
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/new-workspace-qsuag/heridal-t428z/dataset/2

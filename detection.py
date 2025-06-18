@@ -12,4 +12,4 @@ if __name__ == "__main__":
                           batch=16, workers=1,
                           copy_paste=0.5, flipud=0.5,
                           perspective=0.00005, scale=0.3,
-                          degrees=45)
+                          degrees=45, imgsz=(600, 800))

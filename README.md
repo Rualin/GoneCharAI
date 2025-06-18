@@ -18,7 +18,8 @@ Thoughts to optimize code for that task:
 - Switch to float16
 - Decrease coefficient for bbox loss and increase for dfloss
 - Think about the usefulness of empty crops: are they useful or harmful? On average, they are useful, but in this task, almost the entire picture is the background, so are they needed?
-- Train on larger crops 
+- Train on larger crops
+- Check: is augmentation "copy_paste" works on detection and, if no, implement it
 
 These notes can increase Pareto efficiency: work speed/accuracy ratio
 

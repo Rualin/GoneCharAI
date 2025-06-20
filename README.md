@@ -10,7 +10,7 @@ Program to segmentate roads from [Massachusetts Roads Dataset](https://www.kaggl
 
 Dataset must be in format as "tiff2" \
 \
-I achieved 66% (62%) IoU
+I achieved 66% (62%) IoU on test and 64% (62%) IoU on valid
 
 ---
 
